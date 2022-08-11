@@ -185,25 +185,42 @@ namespace nvinfer1
 
         int idx = threadIdx.x + blockDim.x * blockIdx.x;
         if (idx >= noElements) return;
-
         int total_grid = yoloWidth * yoloHeight;
         int bnIdx = idx / total_grid;
         idx = idx - total_grid * bnIdx;
-        int info_len_i = 5 + classes;
+        int info_len_i = 180 + 5 + classes;   //should be 180 angle OBB(Oriented Bounding Box)
+        //int info_len_i = 5 + classes;   //HBB(Horizon Bounding Box)
+
         const float* curInput = input + bnIdx * (info_len_i * total_grid * CHECK_COUNT);
 
         for (int k = 0; k < CHECK_COUNT; ++k) {
             float box_prob = Logist(curInput[idx + k * info_len_i * total_grid + 4 * total_grid]);
             if (box_prob < IGNORE_THRESH) continue;
             int class_id = 0;
+            int rota = 0; // add min
             float max_cls_prob = 0.0;
-            for (int i = 5; i < info_len_i; ++i) {
-                float p = Logist(curInput[idx + k * info_len_i * total_grid + i * total_grid]);
+            float max_rota_prob = 0.0;
+
+            /* obtain the confdience of the object */
+            for (int i = 5; i < info_len_i - 180; ++i) {
+                //float p = Logist(curInput[idx + k * info_len_i * total_grid + i * total_grid]);
+                float p = curInput[idx + k * (info_len_i)*total_grid + i * total_grid];
+
                 if (p > max_cls_prob) {
                     max_cls_prob = p;
                     class_id = i - 5;
                 }
             }
+
+            for (int i = 6+5; i < info_len_i; ++i) {
+                //float p = curInput[idx + k * (info_len_i)*total_grid + i * total_grid];
+                float p2 = Logist(curInput[idx + k * info_len_i * total_grid + i * total_grid]) * box_prob;
+                if (p2 > max_rota_prob) {
+                    max_rota_prob = p2;
+                    rota = i-11;
+                }
+            }
+
             float *res_count = output + bnIdx * outputElem;
             int count = (int)atomicAdd(res_count, 1);
             if (count >= maxoutobject) return;
@@ -230,6 +247,7 @@ namespace nvinfer1
             det->bbox[3] = det->bbox[3] * det->bbox[3] * anchors[2 * k + 1];
             det->conf = box_prob * max_cls_prob;
             det->class_id = class_id;
+            det->rorata = rota; // min.add
         }
     }
 
@@ -246,7 +264,11 @@ namespace nvinfer1
             if (numElem < mThreadCount) mThreadCount = numElem;
 
             //printf("Net: %d  %d \n", mYoloV5NetWidth, mYoloV5NetHeight);
+            /*
             CalDetection << < (numElem + mThreadCount - 1) / mThreadCount, mThreadCount, 0, stream >> >
+                (inputs[i], output, numElem, mYoloV5NetWidth, mYoloV5NetHeight, mMaxOutObject, yolo.width, yolo.height, (float*)mAnchor[i], mClassCount, outputElem);
+            */
+            CalDetection << < (numElem + mThreadCount - 1) / mThreadCount2, mThreadCount2, 0, stream >> >
                 (inputs[i], output, numElem, mYoloV5NetWidth, mYoloV5NetHeight, mMaxOutObject, yolo.width, yolo.height, (float*)mAnchor[i], mClassCount, outputElem);
         }
     }

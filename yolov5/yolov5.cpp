@@ -14,6 +14,7 @@
 #define CONF_THRESH 0.5
 #define BATCH_SIZE 1
 #define MAX_IMAGE_INPUT_SIZE_THRESH 3000 * 3000 // ensure it exceed the maximum size in the input images !
+#define PI acos(-1)
 
 // stuff we know about the network and the input/output blobs
 static const int INPUT_H = Yolo::INPUT_H;
@@ -35,6 +36,18 @@ static int get_depth(int x, float gd) {
         --r;
     }
     return std::max<int>(r, 1);
+}
+
+// min.add
+void debug_print(ITensor* input_tensor, std::string head)
+{
+    std::cout << head << " : ";
+
+    for (int i = 0; i < input_tensor->getDimensions().nbDims; i++)
+    {
+        std::cout << input_tensor->getDimensions().d[i] << " ";
+    }
+    std::cout << std::endl;
 }
 
 ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, IBuilderConfig* config, DataType dt, float& gd, float& gw, std::string& wts_name) {
@@ -74,23 +87,28 @@ ICudaEngine* build_engine(unsigned int maxBatchSize, IBuilder* builder, IBuilder
     upsample15->setResizeMode(ResizeMode::kNEAREST);
     upsample15->setOutputDimensions(bottleneck_csp4->getOutput(0)->getDimensions());
 
+    //min.add
+    debug_print(conv14->getOutput(0),"conv14:");
+    debug_print(bottleneck_csp4->getOutput(0), "bottleneck_csp4:");
+    debug_print(upsample15->getOutput(0), "upsample15:");
+
     ITensor* inputTensors16[] = { upsample15->getOutput(0), bottleneck_csp4->getOutput(0) };
     auto cat16 = network->addConcatenation(inputTensors16, 2);
 
     auto bottleneck_csp17 = C3(network, weightMap, *cat16->getOutput(0), get_width(512, gw), get_width(256, gw), get_depth(3, gd), false, 1, 0.5, "model.17");
 
     /* ------ detect ------ */
-    IConvolutionLayer* det0 = network->addConvolutionNd(*bottleneck_csp17->getOutput(0), 3 * (Yolo::CLASS_NUM + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.0.weight"], weightMap["model.24.m.0.bias"]);
+    IConvolutionLayer* det0 = network->addConvolutionNd(*bottleneck_csp17->getOutput(0), 3 * (Yolo::CLASS_NUM + 180 + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.0.weight"], weightMap["model.24.m.0.bias"]);
     auto conv18 = convBlock(network, weightMap, *bottleneck_csp17->getOutput(0), get_width(256, gw), 3, 2, 1, "model.18");
     ITensor* inputTensors19[] = { conv18->getOutput(0), conv14->getOutput(0) };
     auto cat19 = network->addConcatenation(inputTensors19, 2);
     auto bottleneck_csp20 = C3(network, weightMap, *cat19->getOutput(0), get_width(512, gw), get_width(512, gw), get_depth(3, gd), false, 1, 0.5, "model.20");
-    IConvolutionLayer* det1 = network->addConvolutionNd(*bottleneck_csp20->getOutput(0), 3 * (Yolo::CLASS_NUM + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.1.weight"], weightMap["model.24.m.1.bias"]);
+    IConvolutionLayer* det1 = network->addConvolutionNd(*bottleneck_csp20->getOutput(0), 3 * (Yolo::CLASS_NUM + 180 + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.1.weight"], weightMap["model.24.m.1.bias"]);
     auto conv21 = convBlock(network, weightMap, *bottleneck_csp20->getOutput(0), get_width(512, gw), 3, 2, 1, "model.21");
     ITensor* inputTensors22[] = { conv21->getOutput(0), conv10->getOutput(0) };
     auto cat22 = network->addConcatenation(inputTensors22, 2);
     auto bottleneck_csp23 = C3(network, weightMap, *cat22->getOutput(0), get_width(1024, gw), get_width(1024, gw), get_depth(3, gd), false, 1, 0.5, "model.23");
-    IConvolutionLayer* det2 = network->addConvolutionNd(*bottleneck_csp23->getOutput(0), 3 * (Yolo::CLASS_NUM + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.2.weight"], weightMap["model.24.m.2.bias"]);
+    IConvolutionLayer* det2 = network->addConvolutionNd(*bottleneck_csp23->getOutput(0), 3 * (Yolo::CLASS_NUM + 180 + 5), DimsHW{ 1, 1 }, weightMap["model.24.m.2.weight"], weightMap["model.24.m.2.bias"]);
 
     auto yolo = addYoLoLayer(network, weightMap, "model.24", std::vector<IConvolutionLayer*>{det0, det1, det2});
     yolo->getOutput(0)->setName(OUTPUT_BLOB_NAME);
@@ -235,6 +253,7 @@ void APIToModel(unsigned int maxBatchSize, IHostMemory** modelStream, bool& is_p
 
     // Create model to populate the network, then set the outputs and create an engine
     ICudaEngine *engine = nullptr;
+
     if (is_p6) {
         engine = build_engine_p6(maxBatchSize, builder, config, DataType::kFLOAT, gd, gw, wts_name);
     } else {
@@ -303,7 +322,7 @@ int main(int argc, char** argv) {
     std::string wts_name = "";
     std::string engine_name = "";
     bool is_p6 = false;
-    float gd = 0.0f, gw = 0.0f;
+    float gd = 0.0f, gw = 0.0f; //  gd = 0.33; gw = 0.25;
     std::string img_dir;
     if (!parse_args(argc, argv, wts_name, engine_name, is_p6, gd, gw, img_dir)) {
         std::cerr << "arguments not right!" << std::endl;
@@ -314,6 +333,9 @@ int main(int argc, char** argv) {
 
     // create a model using the API directly and serialize it to a stream
     if (!wts_name.empty()) {
+        //min.add
+        // gd = 0.33;
+        // gw = 0.25;
         IHostMemory* modelStream{ nullptr };
         APIToModel(BATCH_SIZE, &modelStream, is_p6, gd, gw, wts_name);
         assert(modelStream != nullptr);
@@ -413,7 +435,39 @@ int main(int argc, char** argv) {
             cv::Mat img = imgs_buffer[b];
             for (size_t j = 0; j < res.size(); j++) {
                 cv::Rect r = get_rect(img, res[j].bbox);
-                cv::rectangle(img, r, cv::Scalar(0x27, 0xC1, 0x36), 2);
+
+                int left, top, cx, cy;
+                left = r.x;
+                top = r.y;
+                cx = r.x + r.width / 2;
+                cy = r.y + r.height / 2;
+
+                float rt = (res[j].rorata - 90) / 180 * PI;
+                float cos2 = cos(rt);
+                float sin2 = sin(rt);
+
+                cv::Point p1, p2, p3, p4, p5;
+                p1.x = cx + r.width / 2 * cos2 + (-r.height / 2 * sin2);
+                p1.y = cy + (-r.width / 2 * sin2) + (-r.height / 2 * cos2);
+
+                p2.x = cx + r.width / 2 * cos2 - (-r.height / 2 * sin2);
+                p2.y = cy + (-r.width / 2 * sin2) - (-r.height / 2 * cos2);
+
+                p3.x = cx - r.width / 2 * cos2 - (-r.height / 2 * sin2);
+                p3.y = cy - (-r.width / 2 * sin2) - (-r.height / 2 * cos2);
+
+                p4.x = cx - r.width / 2 * cos2 + (-r.height / 2 * sin2);
+                p4.y = cy - (-r.width / 2 * sin2) + (-r.height / 2 * cos2);
+
+                p5.x = cx;
+                p5.y = cy;
+
+                cv::line(img, p1, p2, cv::Scalar(0, 0, 255), 2);
+                cv::line(img, p2, p3, cv::Scalar(0, 0, 255), 2);
+                cv::line(img, p3, p4, cv::Scalar(0, 0, 255), 2);
+                cv::line(img, p1, p4, cv::Scalar(0, 0, 255), 2);
+
+                //cv::rectangle(img, r, cv::Scalar(0x27, 0xC1, 0x36), 2);
                 cv::putText(img, std::to_string((int)res[j].class_id), cv::Point(r.x, r.y - 1), cv::FONT_HERSHEY_PLAIN, 1.2, cv::Scalar(0xFF, 0xFF, 0xFF), 2);
             }
             cv::imwrite("_" + file_names[f - fcount + 1 + b], img);

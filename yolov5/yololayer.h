@@ -17,16 +17,19 @@ namespace Yolo
         float anchors[CHECK_COUNT * 2];
     };
     static constexpr int MAX_OUTPUT_BBOX_COUNT = 1000;
-    static constexpr int CLASS_NUM = 80;
-    static constexpr int INPUT_H = 640;  // yolov5's input height and width must be divisible by 32.
-    static constexpr int INPUT_W = 640;
+    static constexpr int CLASS_NUM = 6; // should be my 6 class
+    // static constexpr int INPUT_H = 640;  // yolov5's input height and width must be divisible by 32.
+    // static constexpr int INPUT_W = 640;
 
+    static constexpr int INPUT_H = 2048;  // yolov5's input height and width must be divisible by 32.
+    static constexpr int INPUT_W = 2048;
     static constexpr int LOCATIONS = 4;
     struct alignas(float) Detection {
         //center_x center_y w h
         float bbox[LOCATIONS];
         float conf;  // bbox_conf * cls_conf
         float class_id;
+        float rorata; // add.min to rotation
     };
 }
 
@@ -90,6 +93,7 @@ namespace nvinfer1
     private:
         void forwardGpu(const float* const* inputs, float *output, cudaStream_t stream, int batchSize = 1);
         int mThreadCount = 256;
+        int mThreadCount2 = (Yolo::CLASS_NUM+5)*3+1;   // min.add 
         const char* mPluginNamespace;
         int mKernelCount;
         int mClassCount;
